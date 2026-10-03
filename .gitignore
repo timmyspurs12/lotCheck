@@ -1,0 +1,15 @@
+node_modules
+dist
+build
+coverage
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+storage/private/**
+!storage/private/.gitkeep
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.log

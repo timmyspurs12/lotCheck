@@ -1,0 +1,48 @@
+{
+  "name": "lotcheck-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "backend:dev": "tsx watch backend/src/main.ts",
+    "backend:build": "tsc -p backend/tsconfig.json",
+    "backend:start": "node backend/dist/main.js",
+    "backend:migrate": "tsx backend/src/migrate.ts",
+    "backend:test": "vitest run --config backend/vitest.config.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/multipart": "^10.1.2",
+    "@fastify/rate-limit": "^11.2.0",
+    "@tanstack/react-query": "^5.59.20",
+    "dotenv": "^18.0.5",
+    "fastify": "^5.12.5",
+    "file-type": "^21.3.4",
+    "genlayer-js": "^1.1.8",
+    "jose": "^6.2.12",
+    "lucide-react": "^0.468.0",
+    "mammoth": "^1.13.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.23.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
+  }
+}
