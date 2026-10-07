@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import { DemoAuthGate } from './auth/DemoAuthGate';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles.css';
 import './styles-detail.css';
@@ -22,7 +23,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AppErrorBoundary>
-          <App />
+          <DemoAuthGate>
+            <App />
+          </DemoAuthGate>
         </AppErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>

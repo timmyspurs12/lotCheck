@@ -11,8 +11,10 @@ import type { DocumentService } from '../services/documentService.js';
 import type { GenLayerAdapter } from '../services/genlayerAdapter.js';
 import type { Actor } from '../types/domain.js';
 import { getDocumentById } from '../repositories/reviewRepository.js';
+import { createDemoSessionToken, DEMO_SESSION_TTL_SECONDS } from './auth.js';
 
 const emptyObjectSchema = z.object({}).strict();
+const demoLoginSchema = z.object({ passcode: z.string().min(1).max(256) }).strict();
 const uuidParams = z.object({ id: z.string().uuid() }).strict();
 const reviewParams = z.object({ reviewId: z.string().uuid() }).strict();
 const siteParams = z.object({ siteId: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/) }).strict();
@@ -71,6 +73,30 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDependenci
   await app.register(multipart, {
     limits: { files: 1, fields: 2, parts: 3, fileSize: deps.config.maxUploadBytes, fieldNameSize: 80, fieldSize: 2048, headerPairs: 50 },
     throwFileSizeLimit: true,
+  });
+
+  app.get('/api/auth/mode', { config: { public: true } }, async (request) => {
+    validateEmptyQuery(request);
+    return { mode: deps.config.authMode };
+  });
+
+  app.post('/api/auth/demo-login', {
+    config: { public: true, rateLimit: { max: 60, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    if (deps.config.nodeEnv !== 'demo' || deps.config.authMode !== 'demo') {
+      return reply.code(404).send({ code: 'NOT_FOUND', message: 'The requested API route does not exist.' });
+    }
+    validateEmptyQuery(request);
+    const { passcode } = parse(demoLoginSchema, request.body, 'Demo login');
+    const accessToken = await createDemoSessionToken(passcode, deps.config);
+    if (!accessToken) return reply.code(401).send({ code: 'INVALID_DEMO_CREDENTIALS', message: 'The demo passcode was not accepted.' });
+    return reply.header('Cache-Control', 'private, no-store').send({ access_token: accessToken, token_type: 'Bearer', expires_in: DEMO_SESSION_TTL_SECONDS });
+  });
+
+  app.get('/api/auth/session', async (request, reply) => {
+    validateEmptyQuery(request);
+    const actor = actorFor(request);
+    return reply.header('Cache-Control', 'private, no-store').send({ authenticated: true, actor: { id: actor.id, roles: actor.roles } });
   });
 
   app.get('/api/health', { config: { public: true } }, async (request) => {

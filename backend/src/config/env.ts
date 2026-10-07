@@ -22,7 +22,7 @@ function normalizedRpc(value: string): string | null {
 }
 
 const rawConfigSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production', 'demo']).default('development'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: optionalString,
@@ -42,7 +42,9 @@ const rawConfigSchema = z.object({
   MAX_EXTRACTED_TEXT_CHARS: z.coerce.number().int().min(1000).max(100_000).default(30_000),
   MAX_PACKAGE_BYTES: z.coerce.number().int().min(10_000).max(200_000).default(80_000),
   POLICY_VERSION: z.string().trim().min(1).max(100).default('lotcheck-document-review-v1'),
-  AUTH_MODE: z.enum(['disabled', 'oidc']).default('disabled'),
+  AUTH_MODE: z.enum(['disabled', 'oidc', 'demo']).default('disabled'),
+  DEMO_AUTH_PASSCODE: optionalString,
+  DEMO_AUTH_SIGNING_SECRET: optionalString,
   OIDC_ISSUER: optionalString,
   OIDC_AUDIENCE: optionalString,
   OIDC_JWKS_URL: optionalString,
@@ -61,7 +63,7 @@ const rawConfigSchema = z.object({
 }).strict();
 
 export type AppConfig = {
-  nodeEnv: 'development' | 'test' | 'production';
+  nodeEnv: 'development' | 'test' | 'production' | 'demo';
   host: string;
   port: number;
   databaseUrl: string;
@@ -81,7 +83,9 @@ export type AppConfig = {
   maxExtractedTextChars: number;
   maxPackageBytes: number;
   policyVersion: string;
-  authMode: 'disabled' | 'oidc';
+  authMode: 'disabled' | 'oidc' | 'demo';
+  demoAuthPasscode?: string;
+  demoAuthSigningSecret?: string;
   oidcIssuer?: string;
   oidcAudience?: string;
   oidcJwksUrl?: string;
@@ -108,6 +112,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid backend configuration: ${issues}`);
   }
   const raw = parsed.data;
+  const corsOrigins = raw.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
   const failures: string[] = [];
   if (!raw.DATABASE_URL) failures.push('DATABASE_URL is required.');
   if (raw.GENLAYER_MODE === 'live') {
@@ -153,14 +158,28 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     if (!raw.S3_SERVER_SIDE_ENCRYPTION) failures.push('Production S3 storage requires server-side encryption (AES256 or aws:kms).');
     if (raw.S3_ENDPOINT && !isHttpsUrl(raw.S3_ENDPOINT)) failures.push('S3_ENDPOINT must use HTTPS in production.');
   }
+  if (raw.AUTH_MODE === 'demo' && raw.NODE_ENV !== 'demo') failures.push('AUTH_MODE=demo is only allowed with NODE_ENV=demo.');
+  if (raw.NODE_ENV === 'demo') {
+    if (raw.AUTH_MODE !== 'demo') failures.push('Demo mode requires AUTH_MODE=demo.');
+    if (!raw.DEMO_AUTH_PASSCODE || raw.DEMO_AUTH_PASSCODE.length < 16 || raw.DEMO_AUTH_PASSCODE.length > 256) failures.push('Demo mode requires DEMO_AUTH_PASSCODE between 16 and 256 characters.');
+    if (!raw.DEMO_AUTH_SIGNING_SECRET || Buffer.byteLength(raw.DEMO_AUTH_SIGNING_SECRET, 'utf8') < 32) failures.push('Demo mode requires DEMO_AUTH_SIGNING_SECRET with a minimum length of 32 bytes.');
+    if (raw.GENLAYER_MODE !== 'live') failures.push('Demo mode requires GENLAYER_MODE=live; mock or disabled decisions are not supported.');
+    if (raw.GENLAYER_NETWORK !== 'testnetBradbury') failures.push('Demo mode must use GENLAYER_NETWORK=testnetBradbury.');
+    if (raw.GENLAYER_CONTRACT_ADDRESS?.toLowerCase() !== '0x5c708df3382123d12ec7110f203653e90f12ec57') failures.push('Demo mode must use the existing Bradbury contract at 0x5c708DF3382123d12eC7110F203653E90f12eC57.');
+    if (raw.STORAGE_DRIVER !== 's3') failures.push('Demo mode requires STORAGE_DRIVER=s3 with persistent private object storage.');
+    if (!raw.S3_BUCKET || !raw.S3_REGION || !raw.S3_ACCESS_KEY_ID || !raw.S3_SECRET_ACCESS_KEY) failures.push('Demo mode S3 storage requires bucket, region, access key, and secret key configuration.');
+    if (!raw.S3_SERVER_SIDE_ENCRYPTION) failures.push('Demo mode S3 storage requires server-side encryption (AES256 or aws:kms).');
+    if (raw.GENLAYER_RPC && !isHttpsUrl(raw.GENLAYER_RPC)) failures.push('GENLAYER_RPC must use HTTPS in demo mode.');
+    if (raw.S3_ENDPOINT && !isHttpsUrl(raw.S3_ENDPOINT)) failures.push('S3_ENDPOINT must use HTTPS in demo mode.');
+    if (raw.GENLAYER_EXPLORER_URL && !isHttpsUrl(raw.GENLAYER_EXPLORER_URL)) failures.push('GENLAYER_EXPLORER_URL must use HTTPS in demo mode.');
+  }
   if (raw.STORAGE_DRIVER === 's3' && (!raw.S3_BUCKET || !raw.S3_REGION || !raw.S3_ACCESS_KEY_ID || !raw.S3_SECRET_ACCESS_KEY)) failures.push('S3 storage requires S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY.');
   if (failures.length) throw new Error(`Invalid backend configuration: ${failures.join(' ')}`);
 
-  const corsOrigins = raw.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
   for (const origin of corsOrigins) {
     try {
       const url = new URL(origin);
-      if (url.origin !== origin || (raw.NODE_ENV === 'production' && url.protocol !== 'https:')) failures.push(`CORS_ORIGINS contains an invalid or insecure origin: ${origin}`);
+      if (url.origin !== origin || ((raw.NODE_ENV === 'production' || raw.NODE_ENV === 'demo') && url.protocol !== 'https:')) failures.push(`CORS_ORIGINS contains an invalid or insecure origin: ${origin}`);
     } catch {
       failures.push(`CORS_ORIGINS contains an invalid origin: ${origin}`);
     }
@@ -189,6 +208,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
     maxPackageBytes: raw.MAX_PACKAGE_BYTES,
     policyVersion: raw.POLICY_VERSION,
     authMode: raw.AUTH_MODE,
+    demoAuthPasscode: raw.DEMO_AUTH_PASSCODE,
+    demoAuthSigningSecret: raw.DEMO_AUTH_SIGNING_SECRET,
     oidcIssuer: raw.OIDC_ISSUER,
     oidcAudience: raw.OIDC_AUDIENCE,
     oidcJwksUrl: raw.OIDC_JWKS_URL,

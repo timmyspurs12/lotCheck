@@ -100,7 +100,7 @@ function isTransientFinalizationError(error: unknown) {
 
 function redactConfiguredSecrets(message: string, config: AppConfig) {
   let sanitized = message;
-  for (const secret of [config.genlayerRpc, config.genlayerPrivateKey, config.databaseUrl, config.s3AccessKeyId, config.s3SecretAccessKey, config.oidcJwksUrl]) {
+  for (const secret of [config.genlayerRpc, config.genlayerPrivateKey, config.databaseUrl, config.s3AccessKeyId, config.s3SecretAccessKey, config.oidcJwksUrl, config.demoAuthPasscode, config.demoAuthSigningSecret]) {
     if (secret) sanitized = sanitized.split(secret).join('[REDACTED]');
   }
   return sanitized

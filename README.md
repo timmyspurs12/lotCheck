@@ -60,13 +60,31 @@ Use a deployment secret store, not a checked-in `.env` file.
 For a separately approved first deployment, the helper reads `contracts/lotcheck_review.py`, checks the selected network/RPC pair and chain ID, runs remote schema compilation before submission, sends one deployment, waits for `FINALIZED` plus `FINISHED_WITH_RETURN`, extracts the address, checks the deployed schema, and reads `get_record_count` at the latest finalized state. It stops on the first failure and never changes networks or retries a deployment automatically. No signer is stored in this repository; a no-credentials check stopped at `CONFIGURATION` before an RPC request or transaction. This helper uses the stable SDK's legacy GenLayer-chain transaction path (`eth_estimateGas` and `eth_gasPrice`), not the v0.6 `FeesDistribution` quote, and it does not report an actual fee paid.
 
 For Consensus v0.6, use a separate measured fee-profile path: `gltest --fee-profile` measures representative deploy/write behavior, then the matching v2 SDK estimates current network prices/caps and submits `distribution` and `feeValue` unchanged. The escrowed deposit is not the final cost; unused budget is refunded at finalization. Do not reuse the stable-path command/contract header for Studio-dev.
-- The existing frontend has no built-in OIDC login/token provider. Production deployment must supply bearer tokens through its authentication integration; do not put a static access token in Vite build variables.
+- The frontend includes a shared-passcode login only for the isolated `NODE_ENV=demo` plus `AUTH_MODE=demo` mode. It has no built-in OIDC redirect/login provider; production must keep `AUTH_MODE=oidc` and supply bearer tokens through its approved authentication integration. Never put a static access token or secret in Vite build variables.
+
+## Railway hackathon demo
+
+The repository root `railway.json` configures one backend service: `npm run backend:build`, the checksum-guarded `node backend/dist/migrate.js` pre-deploy step, and `npm run backend:start`. That entry point starts both the Fastify API and the durable submission worker in the same process; do not create a second worker service using the same command, which would run another API and duplicate worker polling. Railway supplies `PORT`; the backend binds to `0.0.0.0`. Deploy the Vite frontend separately and set `VITE_API_BASE_URL` to the public backend origin at frontend build time.
+
+For the explicitly isolated demo service, set `NODE_ENV=demo` and `AUTH_MODE=demo`. Demo mode is not a production bypass: startup still requires PostgreSQL, encrypted S3-compatible storage, the live Bradbury network, and the existing deployed contract. The validator rejects demo auth in `NODE_ENV=production`, rejects disabled/mock GenLayer, and rejects a different network or contract. The demo UI obtains a short-lived signed bearer session from the backend, attaches it to API calls, and offers sign-out. The passcode is shared among demo attendees and does not represent a personal/verified identity; use it only for non-sensitive hackathon data. Production continues to require OIDC.
+
+Configure the Railway backend variables as follows:
+
+- `NODE_ENV=demo`, `AUTH_MODE=demo`, `HOST=0.0.0.0`; use Railway's assigned `PORT`.
+- `DATABASE_URL` as a Railway PostgreSQL service reference. Keep `DB_AUTO_MIGRATE=false`; `railway.json` runs the idempotent checksum-checked migration before starting the service. Set `DB_SSL` to match the provider.
+- `STORAGE_DRIVER=s3`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_SERVER_SIDE_ENCRYPTION=AES256` (or `aws:kms`). For a non-AWS S3-compatible provider, set its HTTPS `S3_ENDPOINT`; configure path-style only if the provider requires it. Railway's ephemeral filesystem is not evidence storage.
+- `DEMO_AUTH_PASSCODE` (a randomly generated 16–256-character passphrase) and `DEMO_AUTH_SIGNING_SECRET` (at least 32 bytes), both as Railway secrets. Generate the signing secret locally, for example with `openssl rand -base64 32`; do not commit either value or put them in `VITE_*` variables. Demo JWT sessions expire after four hours and are held in browser session storage.
+- `GENLAYER_MODE=live`, `GENLAYER_NETWORK=testnetBradbury`, `GENLAYER_RPC=https://rpc-bradbury.genlayer.com`, and `GENLAYER_CONTRACT_ADDRESS=0x5c708DF3382123d12eC7110F203653E90f12eC57`. Inject `GENLAYER_PRIVATE_KEY` from Railway's secret store; the contract must not be redeployed or replaced. Submitting a new review is a real Bradbury transaction, not a mock.
+- `CORS_ORIGINS` should contain the exact HTTPS origin of the separately deployed frontend (comma-separated only if more than one trusted origin is required). Set the frontend build-time `VITE_API_BASE_URL` to the Railway backend's public HTTPS origin.
+
+The Railway service variables above must be supplied in the Railway dashboard/service-reference UI; the checked-in config intentionally contains no database, S3, passcode, signing, OIDC, or chain-signer values. OIDC variables are not used by demo auth but remain required when running with `NODE_ENV=production`.
 
 ## API surface
 
-All non-health routes require a verified reviewer identity. Request bodies and path/query inputs are schema-validated; submission accepts no decision field.
+All review/evidence/document routes require a verified reviewer identity. `GET /api/health`, `GET /api/auth/mode`, and the isolated demo-login endpoint are public; `GET /api/auth/session` is protected. Request bodies and path/query inputs are schema-validated; submission accepts no decision field.
 
 - `GET /api/health`
+- `GET /api/auth/mode`, `POST /api/auth/demo-login` (enabled only in explicit demo mode), `GET /api/auth/session`
 - `GET /api/sites`, `POST /api/sites`, `GET /api/sites/:siteId`
 - `GET /api/reviews`, `POST /api/reviews`, `GET /api/reviews/:reviewId`
 - `POST /api/reviews/:reviewId/evidence`, `GET /api/reviews/:reviewId/evidence`
@@ -96,4 +114,4 @@ npm run backend:build
 npm run build
 ```
 
-Backend tests cover deterministic readiness/comparison, actual-byte hashing, canonical role/document response fields, strict GenLayer result parsing, failed lifecycle classification, evidence immutability rules, idempotent retry behavior, the GenLayer finalization lifecycle, and a Fastify-inject test proving a client-supplied `{ "decision": "ACCEPT" }` is rejected. They are unit/inject tests, not database-backed integration tests. No PostgreSQL migration was validated in this workspace. A read-only Bradbury status, contract-record, and provenance check was performed for the existing transaction; no new deployment or review transaction was submitted, and live database persistence was not verified here.
+Backend tests cover deterministic readiness/comparison, actual-byte hashing, canonical role/document response fields, strict GenLayer result parsing, failed lifecycle classification, evidence immutability rules, idempotent retry behavior, the GenLayer finalization lifecycle, demo-auth isolation/session verification/production OIDC gating, and a Fastify-inject test proving a client-supplied `{ "decision": "ACCEPT" }` is rejected. They are unit/inject tests, not database-backed Railway end-to-end tests. No PostgreSQL migration was applied in this workspace. A read-only Bradbury status, contract-record, and provenance check was performed for the existing transaction; no new deployment or review transaction was submitted, and live Railway database/S3 persistence was not verified here.
