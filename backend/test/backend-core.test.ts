@@ -326,4 +326,22 @@ describe('LotCheck documentary backend core', () => {
     expect(isRetryableSubmissionError(new Error('invalid contract input'))).toBe(false);
     expect(submissionIdempotencyKey(reviewIdentity.reviewId)).toBe(`review:${reviewIdentity.reviewId}`);
   });
+
+  it('22 — fails live GenLayer startup clearly when the secret signer, network, RPC, or deployed address is missing', () => {
+    expect(() => loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://test:test@127.0.0.1:5432/lotcheck_test',
+      GENLAYER_MODE: 'live',
+    })).toThrow(/GENLAYER_NETWORK must be set explicitly.*GENLAYER_RPC must be set explicitly.*GENLAYER_CONTRACT_ADDRESS.*GENLAYER_PRIVATE_KEY is required from a secret manager/s);
+  });
+
+  it('23 — rejects a mismatched real RPC/network pair even though Bradbury and Asimov share chain ID 4221', () => {
+    expect(() => loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://test:test@127.0.0.1:5432/lotcheck_test',
+      GENLAYER_MODE: 'live',
+      GENLAYER_NETWORK: 'testnetBradbury',
+      GENLAYER_RPC: 'https://rpc-asimov.genlayer.com',
+    })).toThrow(/GENLAYER_RPC does not match the canonical endpoint for GENLAYER_NETWORK=testnetBradbury/);
+  });
 });

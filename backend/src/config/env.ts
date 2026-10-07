@@ -4,6 +4,23 @@ import { z } from 'zod';
 const optionalString = z.preprocess((value) => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().optional());
 const networkSchema = z.enum(['testnetAsimov', 'testnetBradbury', 'studionet', 'localnet']);
 
+const canonicalRpcByNetwork = {
+  testnetAsimov: 'https://rpc-asimov.genlayer.com',
+  testnetBradbury: 'https://rpc-bradbury.genlayer.com',
+  studionet: 'https://studio.genlayer.com/api',
+  localnet: 'http://127.0.0.1:4000/api',
+} as const;
+
+function normalizedRpc(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.search || url.hash) return null;
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
 const rawConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('0.0.0.0'),
@@ -32,7 +49,7 @@ const rawConfigSchema = z.object({
   OIDC_REQUIRED_ROLE: z.string().trim().min(1).max(100).default('lotcheck:reviewer'),
   CORS_ORIGINS: z.string().default(''),
   GENLAYER_MODE: z.enum(['disabled', 'live']).default('disabled'),
-  GENLAYER_NETWORK: networkSchema.default('testnetAsimov'),
+  GENLAYER_NETWORK: networkSchema.default('testnetBradbury'),
   GENLAYER_RPC: optionalString,
   GENLAYER_CONTRACT_ADDRESS: optionalString,
   GENLAYER_PRIVATE_KEY: optionalString,
@@ -94,8 +111,17 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const failures: string[] = [];
   if (!raw.DATABASE_URL) failures.push('DATABASE_URL is required.');
   if (raw.GENLAYER_MODE === 'live') {
+    if (!input.GENLAYER_NETWORK?.trim()) failures.push('GENLAYER_NETWORK must be set explicitly when GENLAYER_MODE=live.');
+    if (!raw.GENLAYER_RPC) failures.push('GENLAYER_RPC must be set explicitly when GENLAYER_MODE=live.');
     if (!raw.GENLAYER_CONTRACT_ADDRESS || !/^0x[0-9a-fA-F]{40}$/.test(raw.GENLAYER_CONTRACT_ADDRESS)) failures.push('GENLAYER_CONTRACT_ADDRESS must be a deployed 20-byte address when GENLAYER_MODE=live.');
-    if (!raw.GENLAYER_PRIVATE_KEY || !/^0x[0-9a-fA-F]{64}$/.test(raw.GENLAYER_PRIVATE_KEY)) failures.push('GENLAYER_PRIVATE_KEY must be a 32-byte hex key when GENLAYER_MODE=live.');
+    if (!raw.GENLAYER_PRIVATE_KEY) failures.push('GENLAYER_PRIVATE_KEY is required from a secret manager when GENLAYER_MODE=live; no signer will be generated.');
+    else if (!/^0x[0-9a-fA-F]{64}$/.test(raw.GENLAYER_PRIVATE_KEY)) failures.push('GENLAYER_PRIVATE_KEY must be a 32-byte hex key when GENLAYER_MODE=live.');
+    if (raw.GENLAYER_RPC) {
+      const selectedRpc = normalizedRpc(raw.GENLAYER_RPC);
+      const expectedRpc = normalizedRpc(canonicalRpcByNetwork[raw.GENLAYER_NETWORK]);
+      if (!selectedRpc) failures.push('GENLAYER_RPC must be a canonical HTTP(S) URL without credentials, query, or fragment.');
+      else if (expectedRpc && selectedRpc !== expectedRpc) failures.push(`GENLAYER_RPC does not match the canonical endpoint for GENLAYER_NETWORK=${raw.GENLAYER_NETWORK}; the stable SDK's network definitions use network-specific consensus contracts.`);
+    }
   }
   if (raw.AUTH_MODE === 'oidc') {
     if (!raw.OIDC_ISSUER || !raw.OIDC_AUDIENCE || !raw.OIDC_JWKS_URL) failures.push('OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required when AUTH_MODE=oidc.');

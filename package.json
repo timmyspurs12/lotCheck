@@ -11,7 +11,8 @@
     "backend:build": "tsc -p backend/tsconfig.json",
     "backend:start": "node backend/dist/main.js",
     "backend:migrate": "tsx backend/src/migrate.ts",
-    "backend:test": "vitest run --config backend/vitest.config.ts"
+    "backend:test": "vitest run --config backend/vitest.config.ts",
+    "genlayer:deploy": "node scripts/deploy-lotcheck.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
@@ -23,7 +24,7 @@
     "dotenv": "^18.0.5",
     "fastify": "^5.12.5",
     "file-type": "^21.3.4",
-    "genlayer-js": "^1.1.8",
+    "genlayer-js": "1.1.8",
     "jose": "^6.2.12",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.13.0",
