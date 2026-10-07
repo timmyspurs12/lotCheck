@@ -6,6 +6,9 @@ import type { OnchainRecord } from '../types/domain.js';
 import type { AppConfig } from '../config/env.js';
 
 type SdkTransactionHash = `0x${string}` & { length: 66 };
+type GenLayerClientActions = Pick<ReturnType<typeof createClient>,
+  'getTransaction' | 'readContract' | 'writeContract' | 'finalizeTransaction' | 'request' | 'debugTraceTransaction'>;
+export type GenLayerPollExpectation = { reviewId: string; recordId: string; packageHash: string; finalizationEvmTransactionHash?: string };
 
 export type GenLayerPollResult = {
   state: 'PENDING' | 'FINALIZED' | 'FAILED';
@@ -22,7 +25,7 @@ export interface GenLayerAdapter {
   readonly network: string | null;
   readonly contractAddress: `0x${string}` | null;
   submit(packageJson: string, packageHash: string): Promise<string>;
-  poll(transactionHash: string, expected: { reviewId: string; recordId: string; packageHash: string }): Promise<GenLayerPollResult>;
+  poll(transactionHash: string, expected: GenLayerPollExpectation): Promise<GenLayerPollResult>;
   health(): Promise<{ status: string; connected: boolean; network: string | null; contractAddress: string | null; detail: string | null }>;
 }
 
@@ -74,6 +77,27 @@ function safeObject(value: unknown): Record<string, unknown> {
   return output;
 }
 
+function transactionSnapshot(transaction: GenLayerTransaction, finalizationEvmTransactionHash?: string) {
+  const transactionStatus = asStatusName(transaction);
+  const consensusState = transaction.resultName ? String(transaction.resultName) : null;
+  const blockReference = safeObject({
+    activationBlock: transaction.readStateBlockRange?.activationBlock,
+    processingBlock: transaction.readStateBlockRange?.processingBlock,
+    proposalBlock: transaction.readStateBlockRange?.proposalBlock,
+    statusName: transactionStatus,
+    resultName: transaction.resultName,
+    txExecutionResultName: transaction.txExecutionResultName,
+    numOfRounds: transaction.numOfRounds,
+    finalizationEvmTransactionHash,
+  });
+  return { transactionStatus, consensusState, blockReference };
+}
+
+function isTransientFinalizationError(error: unknown) {
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /timeout|timed out|ETIMEDOUT|EAI_AGAIN|network|socket|fetch|ECONN|connection|reset|429|502|503|504|rate limit|temporar|busy|unavailable/i.test(message);
+}
+
 function redactConfiguredSecrets(message: string, config: AppConfig) {
   let sanitized = message;
   for (const secret of [config.genlayerRpc, config.genlayerPrivateKey, config.databaseUrl, config.s3AccessKeyId, config.s3SecretAccessKey, config.oidcJwksUrl]) {
@@ -107,14 +131,14 @@ export class LiveGenLayerAdapter implements GenLayerAdapter {
   readonly configured = true;
   readonly network: string;
   readonly contractAddress: `0x${string}`;
-  private readonly client;
+  private readonly client: GenLayerClientActions;
   private readonly chain;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private readonly config: AppConfig, client?: GenLayerClientActions) {
     this.chain = chainFor(config);
     this.network = this.chain.name;
     this.contractAddress = config.genlayerContractAddress!;
-    this.client = createClient({
+    this.client = client ?? createClient({
       chain: this.chain,
       endpoint: config.genlayerRpc,
       account: createAccount(config.genlayerPrivateKey!),
@@ -133,29 +157,63 @@ export class LiveGenLayerAdapter implements GenLayerAdapter {
     return hash;
   }
 
-  async poll(transactionHash: string, expected: { reviewId: string; recordId: string; packageHash: string }): Promise<GenLayerPollResult> {
+  async poll(transactionHash: string, expected: GenLayerPollExpectation): Promise<GenLayerPollResult> {
     if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) throw new GenLayerStatusError('INVALID_TRANSACTION_HASH', 'The persisted GenLayer transaction hash is malformed.');
+    const sdkHash = transactionHash as SdkTransactionHash;
     let transaction: GenLayerTransaction;
     try {
-      transaction = await this.client.getTransaction({ hash: transactionHash as SdkTransactionHash });
+      transaction = await this.client.getTransaction({ hash: sdkHash });
     } catch (error) {
       throw new GenLayerStatusError('GENLAYER_STATUS_UNAVAILABLE', error instanceof Error ? error.message.slice(0, 1000) : 'The GenLayer RPC status request failed.');
     }
 
-    const status = asStatusName(transaction);
-    const execution = transaction.txExecutionResultName;
-    const blockReference = safeObject({
-      activationBlock: transaction.readStateBlockRange?.activationBlock,
-      processingBlock: transaction.readStateBlockRange?.processingBlock,
-      proposalBlock: transaction.readStateBlockRange?.proposalBlock,
-      statusName: status,
-      resultName: transaction.resultName,
-      txExecutionResultName: execution,
-      numOfRounds: transaction.numOfRounds,
-    });
+    let finalizationEvmTransactionHash = typeof expected.finalizationEvmTransactionHash === 'string'
+      && /^0x[a-fA-F0-9]{64}$/.test(expected.finalizationEvmTransactionHash)
+      ? expected.finalizationEvmTransactionHash
+      : undefined;
+    let snapshot = transactionSnapshot(transaction, finalizationEvmTransactionHash);
 
-    const consensusState = transaction.resultName ? String(transaction.resultName) : null;
-    const chainState = { transactionStatus: status, consensusState, blockReference };
+    // finalizeTransaction waits for its EVM receipt; keep its hash in block_reference so a later poll won't resend if status RPC lags.
+    if (snapshot.transactionStatus === TransactionStatus.READY_TO_FINALIZE && !finalizationEvmTransactionHash) {
+      try {
+        const submittedHash = await this.client.finalizeTransaction({ txId: sdkHash });
+        if (typeof submittedHash !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(submittedHash)) {
+          throw new Error('The GenLayer SDK did not return a valid EVM transaction hash for finalization.');
+        }
+        finalizationEvmTransactionHash = submittedHash;
+      } catch (error) {
+        let latest: GenLayerTransaction | null = null;
+        try { latest = await this.client.getTransaction({ hash: sdkHash }); } catch { /* status is checked again on the next poll */ }
+        if (latest && asStatusName(latest) === TransactionStatus.FINALIZED) {
+          transaction = latest;
+        } else {
+          const chainState = transactionSnapshot(latest ?? transaction);
+          const message = error instanceof Error ? error.message.slice(0, 1000) : 'The GenLayer finalization action failed.';
+          if (!latest) {
+            throw new GenLayerStatusError('GENLAYER_STATUS_UNAVAILABLE', `Finalization outcome could not be verified. ${message}`, chainState);
+          }
+          throw new GenLayerStatusError(
+            isTransientFinalizationError(error) ? 'GENLAYER_FINALIZATION_UNAVAILABLE' : 'GENLAYER_FINALIZATION_FAILED',
+            message,
+            chainState,
+          );
+        }
+      }
+
+      if (finalizationEvmTransactionHash) {
+        try {
+          transaction = await this.client.getTransaction({ hash: sdkHash });
+        } catch (error) {
+          const chainState = transactionSnapshot(transaction, finalizationEvmTransactionHash);
+          throw new GenLayerStatusError('GENLAYER_STATUS_UNAVAILABLE', error instanceof Error ? error.message.slice(0, 1000) : 'The GenLayer transaction status could not be read after finalization.', chainState);
+        }
+      }
+    }
+
+    snapshot = transactionSnapshot(transaction, finalizationEvmTransactionHash);
+    const { transactionStatus: status, consensusState, blockReference } = snapshot;
+    const execution = transaction.txExecutionResultName;
+    const chainState = snapshot;
     if (classifyGenLayerStatus(status, execution) === 'FAILED' && status !== 'FINALIZED') {
       const error = executionError(transaction, status);
       return { state: 'FAILED', ...chainState, errorCode: `GENLAYER_${status}`, errorMessage: error.message };
@@ -164,7 +222,7 @@ export class LiveGenLayerAdapter implements GenLayerAdapter {
       return {
         state: 'PENDING',
         transactionStatus: status,
-        consensusState: consensusState,
+        consensusState,
         blockReference,
       };
     }

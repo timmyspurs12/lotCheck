@@ -21,6 +21,7 @@ interface JobRow {
   attempts: number;
   poll_errors: number;
   status: string;
+  block_reference?: unknown;
 }
 
 export type RefreshResult = { refreshed: boolean; error?: { code: string; message: string } };
@@ -51,8 +52,18 @@ export function isRetryableSubmissionError(error: unknown) {
   return /timeout|timed out|ETIMEDOUT|EAI_AGAIN|network|socket|fetch|ECONN|connection|reset|429|502|503|504|rate limit|temporar|busy|unavailable/i.test(message);
 }
 
+function finalizationHashFromBlockReference(value: unknown): string | undefined {
+  let reference = value;
+  if (typeof reference === 'string') {
+    try { reference = JSON.parse(reference); } catch { return undefined; }
+  }
+  if (typeof reference !== 'object' || reference === null || Array.isArray(reference)) return undefined;
+  const hash = (reference as Record<string, unknown>).finalizationEvmTransactionHash;
+  return typeof hash === 'string' && /^0x[a-fA-F0-9]{64}$/.test(hash) ? hash : undefined;
+}
+
 function transientPollError(error: unknown) {
-  return error instanceof GenLayerStatusError && ['GENLAYER_STATUS_UNAVAILABLE', 'ONCHAIN_RECORD_READ_FAILED'].includes(error.code);
+  return error instanceof GenLayerStatusError && ['GENLAYER_STATUS_UNAVAILABLE', 'GENLAYER_FINALIZATION_UNAVAILABLE', 'ONCHAIN_RECORD_READ_FAILED'].includes(error.code);
 }
 
 function retryDelay(attempt: number) { return Math.min(60_000, 1000 * 2 ** Math.min(attempt, 6)); }
@@ -141,8 +152,9 @@ export class SubmissionWorker {
 
   async refreshReview(reviewId: string): Promise<RefreshResult> {
     const result = await this.db.query<JobRow>(
-      `SELECT id, review_id, idempotency_key, package_json, request_hash, evidence_package_hash, transaction_hash, attempts, poll_errors, status
-       FROM genlayer_jobs WHERE review_id=$1::uuid`, [reviewId],
+      `SELECT j.id, j.review_id, j.idempotency_key, j.package_json, j.request_hash, j.evidence_package_hash, j.transaction_hash, j.attempts, j.poll_errors, j.status, r.block_reference
+       FROM genlayer_jobs j LEFT JOIN reviews r ON r.id=j.review_id
+       WHERE j.review_id=$1::uuid`, [reviewId],
     );
     const job = result.rows[0];
     if (!job?.transaction_hash || !this.adapter.configured || ['FAILED','RUNNING'].includes(job.status)) return { refreshed: false };
@@ -156,7 +168,12 @@ export class SubmissionWorker {
     }
     let poll: GenLayerPollResult;
     try {
-      poll = await this.adapter.poll(job.transaction_hash, { reviewId: job.review_id, recordId: packageValue.record_id, packageHash: job.evidence_package_hash });
+      poll = await this.adapter.poll(job.transaction_hash, {
+        reviewId: job.review_id,
+        recordId: packageValue.record_id,
+        packageHash: job.evidence_package_hash,
+        finalizationEvmTransactionHash: finalizationHashFromBlockReference(job.block_reference),
+      });
     } catch (error) {
       const failure = await this.handlePollError(job, error);
       return { refreshed: true, error: failure };
@@ -173,12 +190,13 @@ export class SubmissionWorker {
     return inTransaction(this.db, async (client) => {
       const result = await client.query<JobRow>(
         `WITH candidate AS (
-          SELECT id FROM genlayer_jobs
-          WHERE status IN ('QUEUED','WAITING','RUNNING')
-            AND available_at <= now()
-            AND (locked_until IS NULL OR locked_until < now())
-          ORDER BY available_at, created_at
-          FOR UPDATE SKIP LOCKED
+          SELECT j.id, r.block_reference FROM genlayer_jobs j
+          LEFT JOIN reviews r ON r.id=j.review_id
+          WHERE j.status IN ('QUEUED','WAITING','RUNNING')
+            AND j.available_at <= now()
+            AND (j.locked_until IS NULL OR j.locked_until < now())
+          ORDER BY j.available_at, j.created_at
+          FOR UPDATE OF j SKIP LOCKED
           LIMIT 1
         )
         UPDATE genlayer_jobs j
@@ -186,7 +204,7 @@ export class SubmissionWorker {
             attempts=j.attempts + CASE WHEN j.transaction_hash IS NULL THEN 1 ELSE 0 END,
             locked_until=now() + interval '5 minutes'
         FROM candidate c WHERE j.id=c.id
-        RETURNING j.id, j.review_id, j.idempotency_key, j.package_json, j.request_hash, j.evidence_package_hash, j.transaction_hash, j.attempts, j.poll_errors, j.status`,
+        RETURNING j.id, j.review_id, j.idempotency_key, j.package_json, j.request_hash, j.evidence_package_hash, j.transaction_hash, j.attempts, j.poll_errors, j.status, c.block_reference`,
       );
       return result.rows[0] ?? null;
     });
@@ -278,7 +296,12 @@ export class SubmissionWorker {
     }
     let poll: GenLayerPollResult;
     try {
-      poll = await this.adapter.poll(job.transaction_hash!, { reviewId: job.review_id, recordId: packageValue.record_id, packageHash: job.evidence_package_hash });
+      poll = await this.adapter.poll(job.transaction_hash!, {
+        reviewId: job.review_id,
+        recordId: packageValue.record_id,
+        packageHash: job.evidence_package_hash,
+        finalizationEvmTransactionHash: finalizationHashFromBlockReference(job.block_reference),
+      });
     } catch (error) {
       await this.handlePollError(job, error);
       return;
