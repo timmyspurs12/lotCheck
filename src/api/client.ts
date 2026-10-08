@@ -409,7 +409,7 @@ export const api = {
   compareReview: (reviewId: string) => request(
     `/api/reviews/${encodeURIComponent(reviewId)}/compare`,
     reviewResponseSchema,
-    { method: 'POST' },
+    { method: 'POST' , body: JSON.stringify({}) },
     ['review'],
   ),
   submitReview: (reviewId: string) => request(
