@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { clearDemoSessionToken, getDemoSessionToken } from '../auth/demoSession';
 import {
   decisionSchema,
   documentDetailSchema,
@@ -281,6 +282,7 @@ async function request<Schema extends z.ZodTypeAny>(
   unwrapKeys: string[] = [],
 ): Promise<z.output<Schema>> {
   const endpoint = `${API_BASE}${path}`;
+  const accessToken = path === '/api/auth/demo-login' ? null : getDemoSessionToken();
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -288,6 +290,7 @@ async function request<Schema extends z.ZodTypeAny>(
       headers: {
         ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         Accept: 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...init?.headers,
       },
     });
@@ -310,6 +313,10 @@ async function request<Schema extends z.ZodTypeAny>(
   }
 
   if (!response.ok) {
+    if (response.status === 401 && accessToken && path !== '/api/auth/session') {
+      clearDemoSessionToken();
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('lotcheck:demo-session-expired'));
+    }
     const body = isObject(payload) ? payload : {};
     const code = String(pick(body, 'code', 'errorCode', 'error_code') ?? `HTTP_${response.status}`);
     const message = String(pick(body, 'message', 'error', 'detail') ?? `Request failed with status ${response.status}.`);
@@ -334,6 +341,16 @@ const reviewResponseSchema = z.preprocess(normalizeReview, reviewSchema);
 const recordResponseSchema = z.preprocess(normalizeRecord, recordSchema);
 const reviewStatusResponseSchema = z.preprocess(normalizeReviewStatus, reviewStatusSchema);
 const documentResponseSchema = z.preprocess(normalizeDocument, documentDetailSchema);
+const authModeResponseSchema = z.object({ mode: z.enum(['disabled', 'oidc', 'demo']) }).strict();
+const demoLoginResponseSchema = z.object({
+  access_token: z.string().min(1),
+  token_type: z.literal('Bearer'),
+  expires_in: z.number().int().positive(),
+}).strict();
+const authSessionResponseSchema = z.object({
+  authenticated: z.literal(true),
+  actor: z.object({ id: z.string(), roles: z.array(z.string()) }).strict(),
+}).strict();
 
 const sitesResponseSchema = z.array(siteResponseSchema);
 const reviewsResponseSchema = z.array(reviewResponseSchema);
@@ -353,6 +370,13 @@ export interface ReviewFilters {
 }
 
 export const api = {
+  getAuthMode: () => request('/api/auth/mode', authModeResponseSchema),
+  demoLogin: (passcode: string) => request(
+    '/api/auth/demo-login',
+    demoLoginResponseSchema,
+    { method: 'POST', body: JSON.stringify({ passcode }) },
+  ),
+  getAuthSession: () => request('/api/auth/session', authSessionResponseSchema),
   getSites: () => request('/api/sites', sitesResponseSchema, undefined, ['sites']),
   getSite: (id: string) => request(`/api/sites/${encodeURIComponent(id)}`, siteResponseSchema, undefined, ['site']),
   getReviews: (filters: ReviewFilters = {}) => {

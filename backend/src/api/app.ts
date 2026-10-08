@@ -12,7 +12,7 @@ export async function buildApiApp(deps: RouteDependencies) {
     logger: {
       level: deps.config.nodeEnv === 'test' ? 'silent' : 'info',
       redact: {
-        paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]'],
+        paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.body.passcode'],
         censor: '[REDACTED]',
       },
     },
@@ -28,7 +28,7 @@ export async function buildApiApp(deps: RouteDependencies) {
   const origins = deps.config.corsOrigins.length
     ? deps.config.corsOrigins
     : deps.config.nodeEnv === 'development' ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : [];
-  await app.register(cors, { origin: origins.length ? origins : false, methods: ['GET', 'POST', 'OPTIONS'], credentials: false, maxAge: 600 });
+  await app.register(cors, { origin: origins.length ? origins : false, methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Accept', 'Authorization', 'Content-Type'], credentials: false, maxAge: 600 });
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'same-site' } });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute', ban: 0 });
   registerAuthentication(app, deps.config);
