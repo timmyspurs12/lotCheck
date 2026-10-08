@@ -1,8 +1,19 @@
 import { resolve } from 'node:path';
+
 import { z } from 'zod';
 
-const optionalString = z.preprocess((value) => typeof value === 'string' && value.trim() === '' ? undefined : value, z.string().optional());
-const networkSchema = z.enum(['testnetAsimov', 'testnetBradbury', 'studionet', 'localnet']);
+const optionalString = z.preprocess(
+  (value) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  z.string().optional(),
+);
+
+const networkSchema = z.enum([
+  'testnetAsimov',
+  'testnetBradbury',
+  'studionet',
+  'localnet',
+]);
 
 const canonicalRpcByNetwork = {
   testnetAsimov: 'https://rpc-asimov.genlayer.com',
@@ -14,220 +25,777 @@ const canonicalRpcByNetwork = {
 function normalizedRpc(value: string): string | null {
   try {
     const url = new URL(value);
-    if (url.username || url.password || url.search || url.hash) return null;
+
+    if (url.username || url.password || url.search || url.hash) {
+      return null;
+    }
+
     return url.toString().replace(/\/$/, '');
   } catch {
     return null;
   }
 }
 
-const rawConfigSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production', 'demo']).default('development'),
-  HOST: z.string().default('0.0.0.0'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
-  DATABASE_URL: optionalString,
-  DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
-  DB_SSL: z.enum(['disable', 'require', 'verify-full']).default('disable'),
-  DB_AUTO_MIGRATE: z.enum(['true', 'false']).default('false'),
-  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
-  STORAGE_DIR: z.string().default('./storage/private'),
-  S3_BUCKET: optionalString,
-  S3_REGION: optionalString,
-  S3_ENDPOINT: optionalString,
-  S3_ACCESS_KEY_ID: optionalString,
-  S3_SECRET_ACCESS_KEY: optionalString,
-  S3_FORCE_PATH_STYLE: z.enum(['true', 'false']).default('false'),
-  S3_SERVER_SIDE_ENCRYPTION: z.enum(['AES256', 'aws:kms']).optional(),
-  MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(50 * 1024 * 1024).default(10 * 1024 * 1024),
-  MAX_EXTRACTED_TEXT_CHARS: z.coerce.number().int().min(1000).max(100_000).default(30_000),
-  MAX_PACKAGE_BYTES: z.coerce.number().int().min(10_000).max(200_000).default(80_000),
-  POLICY_VERSION: z.string().trim().min(1).max(100).default('lotcheck-document-review-v1'),
-  AUTH_MODE: z.enum(['disabled', 'oidc', 'demo']).default('disabled'),
-  DEMO_AUTH_PASSCODE: optionalString,
-  DEMO_AUTH_SIGNING_SECRET: optionalString,
-  OIDC_ISSUER: optionalString,
-  OIDC_AUDIENCE: optionalString,
-  OIDC_JWKS_URL: optionalString,
-  OIDC_REQUIRED_ROLE: z.string().trim().min(1).max(100).default('lotcheck:reviewer'),
-  CORS_ORIGINS: z.string().default(''),
-  GENLAYER_MODE: z.enum(['disabled', 'live']).default('disabled'),
-  GENLAYER_NETWORK: networkSchema.default('testnetBradbury'),
-  GENLAYER_RPC: optionalString,
-  GENLAYER_CONTRACT_ADDRESS: optionalString,
-  GENLAYER_PRIVATE_KEY: optionalString,
-  GENLAYER_EXPLORER_URL: optionalString,
-  GENLAYER_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(60_000).default(5000),
-  GENLAYER_JOB_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(3000),
-  GENLAYER_JOB_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
-  GENLAYER_MAX_ROTATIONS: z.coerce.number().int().min(0).max(10).default(3),
-}).strict();
+const rawConfigSchema = z
+  .object({
+    NODE_ENV: z
+      .enum(['development', 'test', 'demo', 'production'])
+      .default('development'),
+
+    HOST: z.string().default('0.0.0.0'),
+
+    PORT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(65535)
+      .default(4000),
+
+    DATABASE_URL: optionalString,
+
+    DB_POOL_MAX: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(10),
+
+    DB_SSL: z
+      .enum(['disable', 'require', 'verify-full'])
+      .default('disable'),
+
+    DB_AUTO_MIGRATE: z
+      .enum(['true', 'false'])
+      .default('false'),
+
+    STORAGE_DRIVER: z
+      .enum(['local', 's3'])
+      .default('local'),
+
+    STORAGE_DIR: z.string().default('./storage/private'),
+
+    S3_BUCKET: optionalString,
+    S3_REGION: optionalString,
+    S3_ENDPOINT: optionalString,
+    S3_ACCESS_KEY_ID: optionalString,
+    S3_SECRET_ACCESS_KEY: optionalString,
+
+    S3_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .default('false'),
+
+    S3_SERVER_SIDE_ENCRYPTION: z
+      .enum(['AES256', 'aws:kms'])
+      .optional(),
+
+    MAX_UPLOAD_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1024)
+      .max(50 * 1024 * 1024)
+      .default(10 * 1024 * 1024),
+
+    MAX_EXTRACTED_TEXT_CHARS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(100_000)
+      .default(30_000),
+
+    MAX_PACKAGE_BYTES: z.coerce
+      .number()
+      .int()
+      .min(10_000)
+      .max(200_000)
+      .default(80_000),
+
+    POLICY_VERSION: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .default('lotcheck-document-review-v1'),
+
+    AUTH_MODE: z
+      .enum(['disabled', 'oidc', 'demo'])
+      .default('disabled'),
+
+    DEMO_AUTH_PASSCODE: optionalString,
+
+    DEMO_AUTH_SIGNING_SECRET: optionalString,
+
+    OIDC_ISSUER: optionalString,
+    OIDC_AUDIENCE: optionalString,
+    OIDC_JWKS_URL: optionalString,
+
+    OIDC_REQUIRED_ROLE: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .default('lotcheck:reviewer'),
+
+    CORS_ORIGINS: z.string().default(''),
+
+    GENLAYER_MODE: z
+      .enum(['disabled', 'live'])
+      .default('disabled'),
+
+    GENLAYER_NETWORK: networkSchema.default('testnetBradbury'),
+
+    GENLAYER_RPC: optionalString,
+
+    GENLAYER_CONTRACT_ADDRESS: optionalString,
+
+    GENLAYER_PRIVATE_KEY: optionalString,
+
+    GENLAYER_EXPLORER_URL: optionalString,
+
+    GENLAYER_POLL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .max(60_000)
+      .default(5000),
+
+    GENLAYER_JOB_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(500)
+      .max(60_000)
+      .default(3000),
+
+    GENLAYER_JOB_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .default(8),
+
+    GENLAYER_MAX_ROTATIONS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(10)
+      .default(3),
+  })
+  .strict();
 
 export type AppConfig = {
-  nodeEnv: 'development' | 'test' | 'production' | 'demo';
+  nodeEnv: 'development' | 'test' | 'demo' | 'production';
+
   host: string;
+
   port: number;
+
   databaseUrl: string;
+
   dbPoolMax: number;
+
   dbSsl: 'disable' | 'require' | 'verify-full';
+
   dbAutoMigrate: boolean;
+
   storageDriver: 'local' | 's3';
+
   storageDir: string;
+
   s3Bucket?: string;
+
   s3Region?: string;
+
   s3Endpoint?: string;
+
   s3AccessKeyId?: string;
+
   s3SecretAccessKey?: string;
+
   s3ForcePathStyle: boolean;
+
   s3ServerSideEncryption?: 'AES256' | 'aws:kms';
+
   maxUploadBytes: number;
+
   maxExtractedTextChars: number;
+
   maxPackageBytes: number;
+
   policyVersion: string;
+
   authMode: 'disabled' | 'oidc' | 'demo';
+
   demoAuthPasscode?: string;
+
   demoAuthSigningSecret?: string;
+
   oidcIssuer?: string;
+
   oidcAudience?: string;
+
   oidcJwksUrl?: string;
+
   oidcRequiredRole: string;
+
   corsOrigins: string[];
+
   genlayerMode: 'disabled' | 'live';
+
   genlayerNetwork: z.infer<typeof networkSchema>;
+
   genlayerRpc?: string;
+
   genlayerContractAddress?: `0x${string}`;
+
   genlayerPrivateKey?: `0x${string}`;
+
   genlayerExplorerUrl?: string;
+
   genlayerPollIntervalMs: number;
+
   genlayerJobIntervalMs: number;
+
   genlayerJobMaxAttempts: number;
+
   genlayerMaxRotations: number;
 };
 
-export function loadConfig(input: NodeJS.ProcessEnv = process.env): AppConfig {
-  const allowedKeys = new Set(Object.keys(rawConfigSchema.shape));
-  const selected = Object.fromEntries(Object.entries(input).filter(([key]) => allowedKeys.has(key)));
+export function loadConfig(
+  input: NodeJS.ProcessEnv = process.env,
+): AppConfig {
+  const allowedKeys = new Set(
+    Object.keys(rawConfigSchema.shape),
+  );
+
+  const selected = Object.fromEntries(
+    Object.entries(input).filter(([key]) =>
+      allowedKeys.has(key),
+    ),
+  );
+
   const parsed = rawConfigSchema.safeParse(selected);
+
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((issue) => `${issue.path.join('.') || 'environment'}: ${issue.message}`).join('; ');
-    throw new Error(`Invalid backend configuration: ${issues}`);
+    const issues = parsed.error.issues
+      .map(
+        (issue) =>
+          `${issue.path.join('.') || 'environment'}: ${issue.message}`,
+      )
+      .join('; ');
+
+    throw new Error(
+      `Invalid backend configuration: ${issues}`,
+    );
   }
+
   const raw = parsed.data;
-  const corsOrigins = raw.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
+
+  const corsOrigins = raw.CORS_ORIGINS.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   const failures: string[] = [];
-  if (!raw.DATABASE_URL) failures.push('DATABASE_URL is required.');
+
+  if (!raw.DATABASE_URL) {
+    failures.push('DATABASE_URL is required.');
+  }
+
   if (raw.GENLAYER_MODE === 'live') {
-    if (!input.GENLAYER_NETWORK?.trim()) failures.push('GENLAYER_NETWORK must be set explicitly when GENLAYER_MODE=live.');
-    if (!raw.GENLAYER_RPC) failures.push('GENLAYER_RPC must be set explicitly when GENLAYER_MODE=live.');
-    if (!raw.GENLAYER_CONTRACT_ADDRESS || !/^0x[0-9a-fA-F]{40}$/.test(raw.GENLAYER_CONTRACT_ADDRESS)) failures.push('GENLAYER_CONTRACT_ADDRESS must be a deployed 20-byte address when GENLAYER_MODE=live.');
-    if (!raw.GENLAYER_PRIVATE_KEY) failures.push('GENLAYER_PRIVATE_KEY is required from a secret manager when GENLAYER_MODE=live; no signer will be generated.');
-    else if (!/^0x[0-9a-fA-F]{64}$/.test(raw.GENLAYER_PRIVATE_KEY)) failures.push('GENLAYER_PRIVATE_KEY must be a 32-byte hex key when GENLAYER_MODE=live.');
+    if (!input.GENLAYER_NETWORK?.trim()) {
+      failures.push(
+        'GENLAYER_NETWORK must be set explicitly when GENLAYER_MODE=live.',
+      );
+    }
+
+    if (!raw.GENLAYER_RPC) {
+      failures.push(
+        'GENLAYER_RPC must be set explicitly when GENLAYER_MODE=live.',
+      );
+    }
+
+    if (
+      !raw.GENLAYER_CONTRACT_ADDRESS ||
+      !/^0x[0-9a-fA-F]{40}$/.test(
+        raw.GENLAYER_CONTRACT_ADDRESS,
+      )
+    ) {
+      failures.push(
+        'GENLAYER_CONTRACT_ADDRESS must be a deployed 20-byte address when GENLAYER_MODE=live.',
+      );
+    }
+
+    if (!raw.GENLAYER_PRIVATE_KEY) {
+      failures.push(
+        'GENLAYER_PRIVATE_KEY is required from a secret manager when GENLAYER_MODE=live; no signer will be generated.',
+      );
+    } else if (
+      !/^0x[0-9a-fA-F]{64}$/.test(
+        raw.GENLAYER_PRIVATE_KEY,
+      )
+    ) {
+      failures.push(
+        'GENLAYER_PRIVATE_KEY must be a 32-byte hex key when GENLAYER_MODE=live.',
+      );
+    }
+
     if (raw.GENLAYER_RPC) {
-      const selectedRpc = normalizedRpc(raw.GENLAYER_RPC);
-      const expectedRpc = normalizedRpc(canonicalRpcByNetwork[raw.GENLAYER_NETWORK]);
-      if (!selectedRpc) failures.push('GENLAYER_RPC must be a canonical HTTP(S) URL without credentials, query, or fragment.');
-      else if (expectedRpc && selectedRpc !== expectedRpc) failures.push(`GENLAYER_RPC does not match the canonical endpoint for GENLAYER_NETWORK=${raw.GENLAYER_NETWORK}; the stable SDK's network definitions use network-specific consensus contracts.`);
+      const selectedRpc = normalizedRpc(
+        raw.GENLAYER_RPC,
+      );
+
+      const expectedRpc = normalizedRpc(
+        canonicalRpcByNetwork[raw.GENLAYER_NETWORK],
+      );
+
+      if (!selectedRpc) {
+        failures.push(
+          'GENLAYER_RPC must be a canonical HTTP(S) URL without credentials, query, or fragment.',
+        );
+      } else if (
+        expectedRpc &&
+        selectedRpc !== expectedRpc
+      ) {
+        failures.push(
+          `GENLAYER_RPC does not match the canonical endpoint for GENLAYER_NETWORK=${raw.GENLAYER_NETWORK}; the stable SDK's network definitions use network-specific consensus contracts.`,
+        );
+      }
     }
   }
+
   if (raw.AUTH_MODE === 'oidc') {
-    if (!raw.OIDC_ISSUER || !raw.OIDC_AUDIENCE || !raw.OIDC_JWKS_URL) failures.push('OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required when AUTH_MODE=oidc.');
-    if (raw.OIDC_JWKS_URL && !isHttpsUrl(raw.OIDC_JWKS_URL)) failures.push('OIDC_JWKS_URL must use HTTPS.');
+    if (
+      !raw.OIDC_ISSUER ||
+      !raw.OIDC_AUDIENCE ||
+      !raw.OIDC_JWKS_URL
+    ) {
+      failures.push(
+        'OIDC_ISSUER, OIDC_AUDIENCE, and OIDC_JWKS_URL are required when AUTH_MODE=oidc.',
+      );
+    }
+
+    if (
+      raw.OIDC_JWKS_URL &&
+      !isHttpsUrl(raw.OIDC_JWKS_URL)
+    ) {
+      failures.push(
+        'OIDC_JWKS_URL must use HTTPS.',
+      );
+    }
   }
-  if (raw.DATABASE_URL && !/^postgres(?:ql)?:\/\//.test(raw.DATABASE_URL)) failures.push('DATABASE_URL must be a PostgreSQL connection URL.');
+
+  if (
+    raw.DATABASE_URL &&
+    !/^postgres(?:ql)?:\/\//.test(raw.DATABASE_URL)
+  ) {
+    failures.push(
+      'DATABASE_URL must be a PostgreSQL connection URL.',
+    );
+  }
+
   if (raw.GENLAYER_EXPLORER_URL) {
     try {
-      const explorer = new URL(raw.GENLAYER_EXPLORER_URL);
-      if (!['http:', 'https:'].includes(explorer.protocol) || explorer.username || explorer.password || explorer.search || explorer.hash) failures.push('GENLAYER_EXPLORER_URL must be an HTTP(S) base URL without credentials, query, or fragment.');
-      if (raw.NODE_ENV === 'production' && explorer.protocol !== 'https:') failures.push('GENLAYER_EXPLORER_URL must use HTTPS in production.');
-    } catch { failures.push('GENLAYER_EXPLORER_URL must be a valid URL.'); }
+      const explorer = new URL(
+        raw.GENLAYER_EXPLORER_URL,
+      );
+
+      if (
+        !['http:', 'https:'].includes(
+          explorer.protocol,
+        ) ||
+        explorer.username ||
+        explorer.password ||
+        explorer.search ||
+        explorer.hash
+      ) {
+        failures.push(
+          'GENLAYER_EXPLORER_URL must be an HTTP(S) base URL without credentials, query, or fragment.',
+        );
+      }
+
+      if (
+        raw.NODE_ENV === 'production' &&
+        explorer.protocol !== 'https:'
+      ) {
+        failures.push(
+          'GENLAYER_EXPLORER_URL must use HTTPS in production.',
+        );
+      }
+    } catch {
+      failures.push(
+        'GENLAYER_EXPLORER_URL must be a valid URL.',
+      );
+    }
   }
+
   if (raw.GENLAYER_RPC) {
     try {
       const rpc = new URL(raw.GENLAYER_RPC);
-      if (raw.NODE_ENV === 'production' && rpc.protocol !== 'https:') failures.push('GENLAYER_RPC must use HTTPS in production.');
-      if (!['http:', 'https:'].includes(rpc.protocol)) failures.push('GENLAYER_RPC must use HTTP or HTTPS.');
-    } catch { failures.push('GENLAYER_RPC must be a valid URL.'); }
+
+      if (
+        raw.NODE_ENV === 'production' &&
+        rpc.protocol !== 'https:'
+      ) {
+        failures.push(
+          'GENLAYER_RPC must use HTTPS in production.',
+        );
+      }
+
+      if (
+        !['http:', 'https:'].includes(rpc.protocol)
+      ) {
+        failures.push(
+          'GENLAYER_RPC must use HTTP or HTTPS.',
+        );
+      }
+    } catch {
+      failures.push(
+        'GENLAYER_RPC must be a valid URL.',
+      );
+    }
   }
+
   if (raw.NODE_ENV === 'production') {
-    if (raw.AUTH_MODE !== 'oidc') failures.push('Production requires AUTH_MODE=oidc.');
-    if (raw.OIDC_ISSUER && !isHttpsUrl(raw.OIDC_ISSUER)) failures.push('OIDC_ISSUER must use HTTPS in production.');
-    if (raw.GENLAYER_MODE !== 'live') failures.push('Production requires GENLAYER_MODE=live; disabled/mock decisions are not supported.');
-    if (!raw.GENLAYER_RPC) failures.push('Production requires an explicit GENLAYER_RPC endpoint.');
-    if (raw.GENLAYER_NETWORK === 'localnet' || raw.GENLAYER_NETWORK === 'studionet') failures.push('Production must use a configured GenLayer testnet, not localnet or studionet.');
-    if (raw.STORAGE_DRIVER !== 's3') failures.push('Production requires STORAGE_DRIVER=s3 with private object storage.');
-    if (!raw.S3_BUCKET || !raw.S3_REGION || !raw.S3_ACCESS_KEY_ID || !raw.S3_SECRET_ACCESS_KEY) failures.push('Production S3 storage requires bucket, region, access key, and secret key configuration.');
-    if (!raw.S3_SERVER_SIDE_ENCRYPTION) failures.push('Production S3 storage requires server-side encryption (AES256 or aws:kms).');
-    if (raw.S3_ENDPOINT && !isHttpsUrl(raw.S3_ENDPOINT)) failures.push('S3_ENDPOINT must use HTTPS in production.');
+    if (raw.AUTH_MODE !== 'oidc') {
+      failures.push(
+        'Production requires AUTH_MODE=oidc.',
+      );
+    }
+
+    if (
+      raw.OIDC_ISSUER &&
+      !isHttpsUrl(raw.OIDC_ISSUER)
+    ) {
+      failures.push(
+        'OIDC_ISSUER must use HTTPS in production.',
+      );
+    }
+
+    if (raw.GENLAYER_MODE !== 'live') {
+      failures.push(
+        'Production requires GENLAYER_MODE=live; disabled/mock decisions are not supported.',
+      );
+    }
+
+    if (!raw.GENLAYER_RPC) {
+      failures.push(
+        'Production requires an explicit GENLAYER_RPC endpoint.',
+      );
+    }
+
+    if (
+      raw.GENLAYER_NETWORK === 'localnet' ||
+      raw.GENLAYER_NETWORK === 'studionet'
+    ) {
+      failures.push(
+        'Production must use a configured GenLayer testnet, not localnet or studionet.',
+      );
+    }
+
+    if (raw.STORAGE_DRIVER !== 's3') {
+      failures.push(
+        'Production requires STORAGE_DRIVER=s3 with private object storage.',
+      );
+    }
+
+    if (
+      !raw.S3_BUCKET ||
+      !raw.S3_REGION ||
+      !raw.S3_ACCESS_KEY_ID ||
+      !raw.S3_SECRET_ACCESS_KEY
+    ) {
+      failures.push(
+        'Production S3 storage requires bucket, region, access key, and secret key configuration.',
+      );
+    }
+
+    if (!raw.S3_SERVER_SIDE_ENCRYPTION) {
+      failures.push(
+        'Production S3 storage requires server-side encryption (AES256 or aws:kms).',
+      );
+    }
+
+    if (
+      raw.S3_ENDPOINT &&
+      !isHttpsUrl(raw.S3_ENDPOINT)
+    ) {
+      failures.push(
+        'S3_ENDPOINT must use HTTPS in production.',
+      );
+    }
   }
-  if (raw.AUTH_MODE === 'demo' && raw.NODE_ENV !== 'demo') failures.push('AUTH_MODE=demo is only allowed with NODE_ENV=demo.');
+
+  /*
+   * Public hackathon demo configuration.
+   *
+   * AUTH_MODE=disabled means visitors do not need a passcode,
+   * OIDC identity, or bearer token.
+   *
+   * AUTH_MODE=demo remains available if the passcode system
+   * is ever needed again.
+   */
+  if (
+    raw.AUTH_MODE === 'demo' &&
+    raw.NODE_ENV !== 'demo'
+  ) {
+    failures.push(
+      'AUTH_MODE=demo is only allowed with NODE_ENV=demo.',
+    );
+  }
+
   if (raw.NODE_ENV === 'demo') {
-    if (raw.AUTH_MODE !== 'demo') failures.push('Demo mode requires AUTH_MODE=demo.');
-    if (!raw.DEMO_AUTH_PASSCODE || raw.DEMO_AUTH_PASSCODE.length < 16 || raw.DEMO_AUTH_PASSCODE.length > 256) failures.push('Demo mode requires DEMO_AUTH_PASSCODE between 16 and 256 characters.');
-    if (!raw.DEMO_AUTH_SIGNING_SECRET || Buffer.byteLength(raw.DEMO_AUTH_SIGNING_SECRET, 'utf8') < 32) failures.push('Demo mode requires DEMO_AUTH_SIGNING_SECRET with a minimum length of 32 bytes.');
-    if (raw.GENLAYER_MODE !== 'live') failures.push('Demo mode requires GENLAYER_MODE=live; mock or disabled decisions are not supported.');
-    if (raw.GENLAYER_NETWORK !== 'testnetBradbury') failures.push('Demo mode must use GENLAYER_NETWORK=testnetBradbury.');
-    if (raw.GENLAYER_CONTRACT_ADDRESS?.toLowerCase() !== '0x5c708df3382123d12ec7110f203653e90f12ec57') failures.push('Demo mode must use the existing Bradbury contract at 0x5c708DF3382123d12eC7110F203653E90f12eC57.');
-    if (raw.STORAGE_DRIVER !== 's3') failures.push('Demo mode requires STORAGE_DRIVER=s3 with persistent private object storage.');
-    if (!raw.S3_BUCKET || !raw.S3_REGION || !raw.S3_ACCESS_KEY_ID || !raw.S3_SECRET_ACCESS_KEY) failures.push('Demo mode S3 storage requires bucket, region, access key, and secret key configuration.');
-    if (!raw.S3_SERVER_SIDE_ENCRYPTION) failures.push('Demo mode S3 storage requires server-side encryption (AES256 or aws:kms).');
-    if (raw.GENLAYER_RPC && !isHttpsUrl(raw.GENLAYER_RPC)) failures.push('GENLAYER_RPC must use HTTPS in demo mode.');
-    if (raw.S3_ENDPOINT && !isHttpsUrl(raw.S3_ENDPOINT)) failures.push('S3_ENDPOINT must use HTTPS in demo mode.');
-    if (raw.GENLAYER_EXPLORER_URL && !isHttpsUrl(raw.GENLAYER_EXPLORER_URL)) failures.push('GENLAYER_EXPLORER_URL must use HTTPS in demo mode.');
+    if (
+      raw.AUTH_MODE !== 'disabled' &&
+      raw.AUTH_MODE !== 'demo'
+    ) {
+      failures.push(
+        'Demo mode requires AUTH_MODE=disabled or AUTH_MODE=demo.',
+      );
+    }
+
+    if (raw.AUTH_MODE === 'demo') {
+      if (
+        !raw.DEMO_AUTH_PASSCODE ||
+        raw.DEMO_AUTH_PASSCODE.length < 16 ||
+        raw.DEMO_AUTH_PASSCODE.length > 256
+      ) {
+        failures.push(
+          'Demo mode with AUTH_MODE=demo requires DEMO_AUTH_PASSCODE between 16 and 256 characters.',
+        );
+      }
+
+      if (
+        !raw.DEMO_AUTH_SIGNING_SECRET ||
+        Buffer.byteLength(
+          raw.DEMO_AUTH_SIGNING_SECRET,
+          'utf8',
+        ) < 32
+      ) {
+        failures.push(
+          'Demo mode with AUTH_MODE=demo requires DEMO_AUTH_SIGNING_SECRET with a minimum length of 32 bytes.',
+        );
+      }
+    }
+
+    if (raw.GENLAYER_MODE !== 'live') {
+      failures.push(
+        'Demo mode requires GENLAYER_MODE=live; mock or disabled decisions are not supported.',
+      );
+    }
+
+    if (
+      raw.GENLAYER_NETWORK !== 'testnetBradbury'
+    ) {
+      failures.push(
+        'Demo mode must use GENLAYER_NETWORK=testnetBradbury.',
+      );
+    }
+
+    if (
+      raw.GENLAYER_CONTRACT_ADDRESS?.toLowerCase() !==
+      '0x5c708df3382123d12ec7110f203653e90f12ec57'
+    ) {
+      failures.push(
+        'Demo mode must use the existing Bradbury contract at 0x5c708DF3382123d12eC7110F203653E90f12eC57.',
+      );
+    }
+
+    if (raw.STORAGE_DRIVER !== 's3') {
+      failures.push(
+        'Demo mode requires STORAGE_DRIVER=s3 with persistent private object storage.',
+      );
+    }
+
+    if (
+      !raw.S3_BUCKET ||
+      !raw.S3_REGION ||
+      !raw.S3_ACCESS_KEY_ID ||
+      !raw.S3_SECRET_ACCESS_KEY
+    ) {
+      failures.push(
+        'Demo mode S3 storage requires bucket, region, access key, and secret key configuration.',
+      );
+    }
+
+    if (!raw.S3_SERVER_SIDE_ENCRYPTION) {
+      failures.push(
+        'Demo mode S3 storage requires server-side encryption (AES256 or aws:kms).',
+      );
+    }
+
+    if (
+      raw.GENLAYER_RPC &&
+      !isHttpsUrl(raw.GENLAYER_RPC)
+    ) {
+      failures.push(
+        'GENLAYER_RPC must use HTTPS in demo mode.',
+      );
+    }
+
+    if (
+      raw.S3_ENDPOINT &&
+      !isHttpsUrl(raw.S3_ENDPOINT)
+    ) {
+      failures.push(
+        'S3_ENDPOINT must use HTTPS in demo mode.',
+      );
+    }
+
+    if (
+      raw.GENLAYER_EXPLORER_URL &&
+      !isHttpsUrl(raw.GENLAYER_EXPLORER_URL)
+    ) {
+      failures.push(
+        'GENLAYER_EXPLORER_URL must use HTTPS in demo mode.',
+      );
+    }
   }
-  if (raw.STORAGE_DRIVER === 's3' && (!raw.S3_BUCKET || !raw.S3_REGION || !raw.S3_ACCESS_KEY_ID || !raw.S3_SECRET_ACCESS_KEY)) failures.push('S3 storage requires S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY.');
-  if (failures.length) throw new Error(`Invalid backend configuration: ${failures.join(' ')}`);
+
+  if (
+    raw.STORAGE_DRIVER === 's3' &&
+    (!raw.S3_BUCKET ||
+      !raw.S3_REGION ||
+      !raw.S3_ACCESS_KEY_ID ||
+      !raw.S3_SECRET_ACCESS_KEY)
+  ) {
+    failures.push(
+      'S3 storage requires S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY.',
+    );
+  }
+
+  if (failures.length) {
+    throw new Error(
+      `Invalid backend configuration: ${failures.join(' ')}`,
+    );
+  }
 
   for (const origin of corsOrigins) {
     try {
       const url = new URL(origin);
-      if (url.origin !== origin || ((raw.NODE_ENV === 'production' || raw.NODE_ENV === 'demo') && url.protocol !== 'https:')) failures.push(`CORS_ORIGINS contains an invalid or insecure origin: ${origin}`);
+
+      if (
+        url.origin !== origin ||
+        ((raw.NODE_ENV === 'production' ||
+          raw.NODE_ENV === 'demo') &&
+          url.protocol !== 'https:')
+      ) {
+        failures.push(
+          `CORS_ORIGINS contains an invalid or insecure origin: ${origin}`,
+        );
+      }
     } catch {
-      failures.push(`CORS_ORIGINS contains an invalid origin: ${origin}`);
+      failures.push(
+        `CORS_ORIGINS contains an invalid origin: ${origin}`,
+      );
     }
   }
-  if (failures.length) throw new Error(`Invalid backend configuration: ${failures.join(' ')}`);
+
+  if (failures.length) {
+    throw new Error(
+      `Invalid backend configuration: ${failures.join(' ')}`,
+    );
+  }
 
   return {
     nodeEnv: raw.NODE_ENV,
+
     host: raw.HOST,
+
     port: raw.PORT,
+
     databaseUrl: raw.DATABASE_URL!,
+
     dbPoolMax: raw.DB_POOL_MAX,
+
     dbSsl: raw.DB_SSL,
+
     dbAutoMigrate: raw.DB_AUTO_MIGRATE === 'true',
+
     storageDriver: raw.STORAGE_DRIVER,
+
     storageDir: resolve(raw.STORAGE_DIR),
+
     s3Bucket: raw.S3_BUCKET,
+
     s3Region: raw.S3_REGION,
+
     s3Endpoint: raw.S3_ENDPOINT,
+
     s3AccessKeyId: raw.S3_ACCESS_KEY_ID,
+
     s3SecretAccessKey: raw.S3_SECRET_ACCESS_KEY,
-    s3ForcePathStyle: raw.S3_FORCE_PATH_STYLE === 'true',
-    s3ServerSideEncryption: raw.S3_SERVER_SIDE_ENCRYPTION,
+
+    s3ForcePathStyle:
+      raw.S3_FORCE_PATH_STYLE === 'true',
+
+    s3ServerSideEncryption:
+      raw.S3_SERVER_SIDE_ENCRYPTION,
+
     maxUploadBytes: raw.MAX_UPLOAD_BYTES,
-    maxExtractedTextChars: raw.MAX_EXTRACTED_TEXT_CHARS,
+
+    maxExtractedTextChars:
+      raw.MAX_EXTRACTED_TEXT_CHARS,
+
     maxPackageBytes: raw.MAX_PACKAGE_BYTES,
+
     policyVersion: raw.POLICY_VERSION,
+
     authMode: raw.AUTH_MODE,
-    demoAuthPasscode: raw.DEMO_AUTH_PASSCODE,
-    demoAuthSigningSecret: raw.DEMO_AUTH_SIGNING_SECRET,
+
+    demoAuthPasscode:
+      raw.DEMO_AUTH_PASSCODE,
+
+    demoAuthSigningSecret:
+      raw.DEMO_AUTH_SIGNING_SECRET,
+
     oidcIssuer: raw.OIDC_ISSUER,
+
     oidcAudience: raw.OIDC_AUDIENCE,
+
     oidcJwksUrl: raw.OIDC_JWKS_URL,
-    oidcRequiredRole: raw.OIDC_REQUIRED_ROLE,
+
+    oidcRequiredRole:
+      raw.OIDC_REQUIRED_ROLE,
+
     corsOrigins,
+
     genlayerMode: raw.GENLAYER_MODE,
-    genlayerNetwork: raw.GENLAYER_NETWORK,
-    genlayerRpc: raw.GENLAYER_RPC,
-    genlayerContractAddress: raw.GENLAYER_CONTRACT_ADDRESS as `0x${string}` | undefined,
-    genlayerPrivateKey: raw.GENLAYER_PRIVATE_KEY as `0x${string}` | undefined,
-    genlayerExplorerUrl: raw.GENLAYER_EXPLORER_URL,
-    genlayerPollIntervalMs: raw.GENLAYER_POLL_INTERVAL_MS,
-    genlayerJobIntervalMs: raw.GENLAYER_JOB_INTERVAL_MS,
-    genlayerJobMaxAttempts: raw.GENLAYER_JOB_MAX_ATTEMPTS,
-    genlayerMaxRotations: raw.GENLAYER_MAX_ROTATIONS,
+
+    genlayerNetwork:
+      raw.GENLAYER_NETWORK,
+
+    genlayerRpc:
+      raw.GENLAYER_RPC,
+
+    genlayerContractAddress:
+      raw.GENLAYER_CONTRACT_ADDRESS as
+        | `0x${string}`
+        | undefined,
+
+    genlayerPrivateKey:
+      raw.GENLAYER_PRIVATE_KEY as
+        | `0x${string}`
+        | undefined,
+
+    genlayerExplorerUrl:
+      raw.GENLAYER_EXPLORER_URL,
+
+    genlayerPollIntervalMs:
+      raw.GENLAYER_POLL_INTERVAL_MS,
+
+    genlayerJobIntervalMs:
+      raw.GENLAYER_JOB_INTERVAL_MS,
+
+    genlayerJobMaxAttempts:
+      raw.GENLAYER_JOB_MAX_ATTEMPTS,
+
+    genlayerMaxRotations:
+      raw.GENLAYER_MAX_ROTATIONS,
   };
 }
 
 function isHttpsUrl(value: string) {
-  try { return new URL(value).protocol === 'https:'; } catch { return false; }
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
